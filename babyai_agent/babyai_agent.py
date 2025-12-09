@@ -30,7 +30,7 @@ class BabyAIAgentConfig:
     
     # Agent Parameters
     max_rounds: int = field(default=20)
-    max_retries: int = field(default=3)
+    max_retries: int = field(default=10)
     retry_delay: float = field(default=1.0)
 
 
@@ -168,7 +168,8 @@ Action:
         """
         # Construct the user message
         if goal:
-            user_message = f"Goal: {goal}\n\nObservation: {observation}"
+            user_message = f"Goal: {goal}"
+            # user_message = f"Goal: {goal}\n\nObservation: {observation}"
         else:
             user_message = f"Observation: {observation}"
         
