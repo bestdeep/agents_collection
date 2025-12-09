@@ -12,6 +12,7 @@ def test_agent_initialization():
     """Test that the agent can be initialized."""
     print("Test 1: Agent Initialization")
     config = BabyAIAgentConfig(
+        base_url="https://openrouter.ai/api/v1",
         api_key="test-key",
         model="gpt-3.5-turbo"
     )

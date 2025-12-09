@@ -7,27 +7,24 @@ This script runs the TextCraft agent on a set of tasks and evaluates its perform
 import os
 import json
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 from textcraft_agent import TextCraftAgent, TextCraftAgentConfig
-import requests
 
-
-def create_env(env_url: str) -> int:
-    """Create a new environment instance."""
-    response = requests.post(f"{env_url}/create", json={})
-    result = response.json()
-    if "error" in result:
-        raise RuntimeError(f"Failed to create environment: {result['error']}")
-    return result["id"]
-
-
-def close_env(env_url: str, env_id: int):
-    """Close an environment instance."""
-    try:
-        requests.post(f"{env_url}/close", json={"id": env_id})
-    except Exception as e:
-        print(f"Warning: Failed to close environment {env_id}: {e}")
+# Import environment client from agentenv
+try:
+    from agentenv.controller import BaseEnvClient
+    from agentenv.envs.textcraft import TextCraftEnvClient
+except ImportError as e:
+    print("Error: agentenv package or its dependencies not found.")
+    print(f"Import error: {e}")
+    print("\nPlease install agentenv and its dependencies:")
+    print("  cd ../../agentenv")
+    print("  pip install -e .")
+    print("\nIf you see 'No module named httpx' or similar, install missing dependencies:")
+    print("  pip install httpx requests tqdm")
+    sys.exit(1)
 
 
 def run_evaluation(config_path: str, verbose: bool = True):
@@ -59,81 +56,160 @@ def run_evaluation(config_path: str, verbose: bool = True):
     # Initialize agent
     agent = TextCraftAgent(agent_config)
     
+    # Initialize environment client
+    env_client = TextCraftEnvClient(
+        env_server_base=env_config["env_server"],
+        data_len=env_config.get("data_len", 200),
+        timeout=env_config.get("timeout", 300)
+    )
+    
     # Run evaluation
     num_tasks = eval_config["num_tasks"]
     start_idx = eval_config["start_idx"]
-    env_url = env_config["env_server"]
     
     print(f"\n{'='*70}")
     print(f"TextCraft Agent Evaluation")
     print(f"{'='*70}")
     print(f"Model: {agent_config.model}")
-    print(f"Environment Server: {env_url}")
+    print(f"Environment Server: {env_config['env_server']}")
     print(f"Tasks: {num_tasks} (starting from index {start_idx})")
     print(f"Output Directory: {run_dir}")
     print(f"{'='*70}\n")
     
-    # Check if environment server is running
+    # Create environment instance
     try:
-        response = requests.get(f"{env_url}/", timeout=5)
-        print(f"Environment server status: {response.text}\n")
+        env_idx = env_client.create()
+        print(f"Environment created with ID: {env_idx}\n")
     except Exception as e:
-        print(f"Warning: Could not connect to environment server at {env_url}")
-        print(f"Error: {e}")
-        print("Please make sure the TextCraft server is running.")
-        print("Start it with: textcraft --host 0.0.0.0 --port 36001\n")
-        return
+        print(f"Error creating environment: {e}")
+        print("Make sure the TextCraft server is running:")
+        print("  textcraft --host 0.0.0.0 --port 36001")
+        sys.exit(1)
     
     results = []
     success_count = 0
+    total_reward = 0.0
     
-    for i in range(num_tasks):
-        task_idx = start_idx + i
-        print(f"\n{'#'*70}")
-        print(f"Task {i+1}/{num_tasks} (Data Index: {task_idx})")
-        print(f"{'#'*70}")
-        
-        env_id = None
+    try:
+        for i in range(num_tasks):
+            task_idx = start_idx + i
+            
+            if verbose:
+                print(f"\n{'#'*70}")
+                print(f"Task {i+1}/{num_tasks} (Data Index: {task_idx})")
+                print(f"{'#'*70}")
+            
+            try:
+                # Reset environment and conversation
+                agent.reset_conversation()
+                reset_response = env_client.reset(env_idx, task_idx)
+                
+                observation = reset_response["observation"]
+                done = reset_response.get("done", False)
+                reward = reset_response.get("reward", 0)
+                
+                if verbose:
+                    print(f"\nInitial Observation:\n{observation}\n")
+                
+                step_count = 0
+                episode_history = []
+                
+                # Run episode
+                while not done and step_count < agent_config.max_rounds:
+                    try:
+                        is_first_step = (step_count == 0)
+                        full_response, action = agent.generate_action(observation, include_goal=is_first_step)
+                        
+                        if verbose:
+                            print(f"\n--- Step {step_count + 1} ---")
+                            print(f"Agent Response:\n{full_response}")
+                            print(f"\nExecuting Action: {action}")
+                        
+                        # Take step in environment
+                        step_output = env_client.step(env_idx, action)
+                        
+                        observation = step_output.state
+                        reward = step_output.reward
+                        done = step_output.done
+                        
+                        if verbose:
+                            print(f"Observation: {observation}")
+                            print(f"Reward: {reward}, Done: {done}")
+                        
+                        # Record step
+                        episode_history.append({
+                            "step": step_count,
+                            "thought_and_action": full_response,
+                            "action": action,
+                            "observation": observation,
+                            "reward": reward,
+                            "done": done
+                        })
+                        
+                        step_count += 1
+                        
+                    except Exception as e:
+                        print(f"Error during step {step_count}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        break
+                
+                success = reward >= 1.0
+                
+                # Record result
+                result = {
+                    "task_idx": task_idx,
+                    "success": success,
+                    "reward": reward,
+                    "steps": step_count,
+                    "done": done
+                }
+                results.append(result)
+                
+                if success:
+                    success_count += 1
+                total_reward += reward
+                
+                # Save conversation if requested
+                if eval_config.get("save_conversations", True):
+                    conv_file = run_dir / f"task_{task_idx}_conversation.json"
+                    with open(conv_file, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            "task_idx": task_idx,
+                            "result": result,
+                            "conversation": agent.conversation_history,
+                            "history": episode_history
+                        }, f, indent=2, ensure_ascii=False)
+                
+                # Print summary
+                if verbose:
+                    print(f"\n{'='*70}")
+                    print(f"Task {task_idx} Complete!")
+                    print(f"Success: {success}, Reward: {reward}, Steps: {step_count}")
+                    print(f"Success Rate So Far: {success_count}/{i+1} ({100*success_count/(i+1):.1f}%)")
+                    print(f"{'='*70}")
+                else:
+                    print(f"Task {task_idx}: {'✓' if success else '✗'} (Steps: {step_count})")
+                
+            except Exception as e:
+                print(f"\nError running task {task_idx}: {e}")
+                import traceback
+                traceback.print_exc()
+                results.append({
+                    "task_idx": task_idx,
+                    "success": False,
+                    "reward": 0,
+                    "steps": 0,
+                    "error": str(e)
+                })
+    
+    finally:
+        # Close environment
         try:
-            # Create environment
-            env_id = create_env(env_url)
-            
-            # Run episode
-            result = agent.run_episode(env_url, env_id, task_idx, verbose=verbose)
-            
-            # Save conversation if requested
-            if eval_config.get("save_conversations", True):
-                conv_file = run_dir / f"task_{task_idx}_conversation.json"
-                agent.save_conversation(str(conv_file))
-            
-            # Record result
-            result["task_idx"] = task_idx
-            results.append(result)
-            
-            if result["success"]:
-                success_count += 1
-            
-            # Print summary
-            print(f"\nTask {task_idx} Summary:")
-            print(f"  Success: {result['success']}")
-            print(f"  Reward: {result['reward']}")
-            print(f"  Steps: {result['steps']}")
-            print(f"  Success Rate So Far: {success_count}/{i+1} ({100*success_count/(i+1):.1f}%)")
-            
+            env_client.close(env_idx)
+            print("\nEnvironment closed successfully")
         except Exception as e:
-            print(f"\nError running task {task_idx}: {e}")
-            import traceback
-            traceback.print_exc()
-            results.append({
-                "task_idx": task_idx,
-                "success": False,
-                "error": str(e)
-            })
-        
-        finally:
-            # Clean up environment
-            if env_id is not None:
-                close_env(env_url, env_id)
+            print(f"\nWarning: Error closing environment: {e}")
     
     # Save results summary
     summary = {
@@ -142,6 +218,7 @@ def run_evaluation(config_path: str, verbose: bool = True):
         "total_tasks": num_tasks,
         "successful_tasks": success_count,
         "success_rate": success_count / num_tasks if num_tasks > 0 else 0,
+        "average_reward": total_reward / num_tasks if num_tasks > 0 else 0,
         "results": results
     }
     
@@ -156,6 +233,7 @@ def run_evaluation(config_path: str, verbose: bool = True):
     print(f"Total Tasks: {num_tasks}")
     print(f"Successful: {success_count}")
     print(f"Success Rate: {100*success_count/num_tasks:.1f}%")
+    print(f"Average Reward: {total_reward/num_tasks:.3f}")
     print(f"\nResults saved to: {run_dir}")
     print(f"Summary file: {summary_file}")
     print(f"{'='*70}\n")

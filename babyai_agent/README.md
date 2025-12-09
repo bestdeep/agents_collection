@@ -27,11 +27,11 @@ This agent uses an OpenAI-compatible API (e.g., GPT-3.5, GPT-4, or other compati
 
 ```bash
 # Install the main agentenv package
-cd ../agentenv
+cd ../../agentenv
 pip install -e .
 
 # Install BabyAI environment
-cd ../agentenv-babyai
+cd ../../agentenv-babyai
 pip install -e .
 ```
 

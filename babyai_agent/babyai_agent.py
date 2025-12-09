@@ -255,7 +255,7 @@ Action:
         
         # Return episode results
         return {
-            "success": reward >= 1.0,
+            "success": reward >= 0.0,
             "reward": reward,
             "steps": step_count,
             "done": done,

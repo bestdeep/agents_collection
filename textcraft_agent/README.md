@@ -20,13 +20,19 @@ The TextCraft agent is designed to solve crafting tasks by:
 
 ## Installation
 
-1. Install the TextCraft environment:
+1. **Install the AgentGym core package**:
 ```bash
-cd agentenv-textcraft
+cd ../../agentenv
 pip install -e .
 ```
 
-2. Install required dependencies for the agent:
+2. **Install the TextCraft environment**:
+```bash
+cd ../agentenv-textcraft
+pip install -e .
+```
+
+3. **Install required dependencies for the agent**:
 ```bash
 pip install requests
 ```

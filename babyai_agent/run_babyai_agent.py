@@ -23,10 +23,15 @@ from babyai_agent import BabyAIAgent, BabyAIAgentConfig
 
 # Import environment client from agentenv
 try:
-    from agentenv.envs import BabyAIEnvClient
-except ImportError:
-    print("Error: agentenv package not found. Please install it first:")
-    print("cd ../agentenv && pip install -e .")
+    from agentenv.envs.babyai import BabyAIEnvClient
+except ImportError as e:
+    print("Error: agentenv package or its dependencies not found.")
+    print(f"Import error: {e}")
+    print("\nPlease install agentenv and its dependencies:")
+    print("  cd ../../agentenv")
+    print("  pip install -e .")
+    print("\nIf you see 'No module named httpx' or similar, install missing dependencies:")
+    print("  pip install httpx requests tqdm")
     sys.exit(1)
 
 
