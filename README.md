@@ -58,6 +58,39 @@ See [textcraft_agent/README.md](textcraft_agent/README.md) for detailed document
 
 ---
 
+### 3. PrimeIntellect Agent
+
+**Environment**: PrimeIntellect INTELLECT-3-RL (CDE, LGC, MTH, SCI)  
+**Directory**: `primeintellect_agent/`  
+**Description**: A unified LLM-based agent for solving challenges across four PrimeIntellect environments: code generation, logic puzzles, mathematics, and science questions.
+
+**Key Features**:
+- Unified interface for 4 environment types (CDE, LGC, MTH, SCI)
+- Environment-specific intelligent prompting
+- Conversation history management
+- Response parsing (code blocks and boxed answers)
+- Direct integration with PrimeIntellect evaluators
+- Result saving with conversation history and scores
+- CLI and Python API support
+
+**Quick Start**:
+```bash
+cd primeintellect_agent
+
+# Single evaluation
+python cli.py --api-key YOUR_KEY --model gpt-4o evaluate --env mth --task-id 0
+
+# Benchmark (10 tasks)
+python cli.py --api-key YOUR_KEY --model gpt-4o benchmark --env mth --num-tasks 10
+
+# Save results
+python cli.py --save --output-dir results --api-key YOUR_KEY --model gpt-4o benchmark --env cde --num-tasks 5
+```
+
+See [primeintellect_agent/README.md](primeintellect_agent/README.md) for detailed documentation.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
