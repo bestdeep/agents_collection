@@ -77,7 +77,8 @@ async def cmd_benchmark(args):
         temperature=args.temperature or 0.7,
         base_url=args.base_url or os.getenv("BASE_URL") or "https://api.openai.com/v1",
         save_results=args.save,
-        output_dir=args.output_dir if hasattr(args, 'output_dir') else "results"
+        output_dir=args.output_dir if hasattr(args, 'output_dir') else "results",
+        save_interval=args.save_interval if hasattr(args, 'save_interval') else 10
     )
     
     print("\n" + "="*70)
@@ -271,6 +272,8 @@ def main():
                                  help='Environment type')
     benchmark_parser.add_argument('--num-tasks', type=int, default=10,
                                  help='Number of tasks to evaluate (default: 10)')
+    benchmark_parser.add_argument('--save-interval', type=int, default=10,
+                                 help='Save intermediate results every N tasks (default: 10)')
     
     # Evaluate command
     eval_parser = subparsers.add_parser('evaluate', help='Evaluate a single task from dataset')

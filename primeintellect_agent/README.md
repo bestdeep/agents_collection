@@ -187,6 +187,33 @@ Each saved result includes:
 - **ground_truth**: Correct answer (if available)
 - **conversation_history**: Full conversation with system prompt
 
+## Known Issues
+
+### Automatic Skip of Problematic Tasks
+
+**The agent now automatically skips known problematic tasks** to prevent crashes during benchmarks.
+
+Some CDE (code) tasks trigger system-level kills (exit code 137) during evaluation due to issues with subprocess execution during code testing. The agent maintains a list of known problematic tasks and automatically skips them:
+
+- **CDE Task 5**: Known to cause system kill
+- (Other tasks may be added as they're discovered)
+
+When running benchmarks, you'll see:
+```
+⚠ Task 5 is known to cause issues - automatically skipping
+```
+
+The skipped tasks are:
+1. **Not counted** in the total tasks completed
+2. **Listed** in the final results under `skipped_tasks`
+3. **Automatically bypassed** - the benchmark continues with the next task
+
+**To evaluate a wider range of tasks** despite some being problematic, request more tasks than needed:
+```bash
+# Want 100 completed tasks? Request 105 to account for ~5 known bad tasks
+python cli.py --api-key KEY --model MODEL benchmark --env cde --num-tasks 105
+```
+
 ## Configuration
 
 ### Agent Configuration
