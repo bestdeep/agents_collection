@@ -36,7 +36,8 @@ def cmd_solve(args):
         api_key=args.api_key or os.getenv("OPENAI_API_KEY"),
         model=args.model or agent_config.model,
         temperature=args.temperature or agent_config.temperature,
-        verbose=args.verbose
+        verbose=args.verbose,
+        base_url=args.base_url or os.getenv("BASE_URL") or "https://api.openai.com/v1"
     )
     
     # Solve
@@ -73,7 +74,10 @@ async def cmd_benchmark(args):
         api_key=args.api_key or os.getenv("OPENAI_API_KEY"),
         model=args.model or "gpt-4o",
         verbose=args.verbose,
-        temperature=args.temperature or 0.7
+        temperature=args.temperature or 0.7,
+        base_url=args.base_url or os.getenv("BASE_URL") or "https://api.openai.com/v1",
+        save_results=args.save,
+        output_dir=args.output_dir if hasattr(args, 'output_dir') else "results"
     )
     
     print("\n" + "="*70)
@@ -84,6 +88,10 @@ async def cmd_benchmark(args):
     print(f"Average Score: {results['average_score']:.2%}")
     print(f"Success Rate: {results['success_rate']:.2%}")
     print(f"Individual Scores: {results['scores']}")
+    
+    if 'saved_to' in results:
+        print(f"\n✓ Results saved to: {results['saved_to']}")
+    
     print("="*70)
 
 
@@ -99,7 +107,8 @@ async def cmd_evaluate(args):
     except FileNotFoundError:
         agent_config = PrimeIntellectAgentConfig(
             model=args.model or "gpt-4o",
-            verbose=args.verbose
+            verbose=args.verbose,
+            base_url=args.base_url or "https://api.openai.com/v1"
         )
         env_configs = {}
     
@@ -117,7 +126,9 @@ async def cmd_evaluate(args):
     
     result = await env_agent.solve_and_evaluate(
         env=args.env,
-        task_id=args.task_id
+        task_id=args.task_id,
+        save_results=args.save,
+        output_dir=args.output_dir if hasattr(args, 'output_dir') else "results"
     )
     
     print("\n" + "="*70)
@@ -130,6 +141,19 @@ async def cmd_evaluate(args):
     print(f"\nResponse:\n{result['response']}")
     print(f"\n{'-'*70}")
     print(f"\nScore: {result['score']}")
+    
+    # Show extracted answer if available
+    if result.get('extracted_answer'):
+        print(f"\nExtracted Answer: {result['extracted_answer']}")
+    
+    # Show ground truth if available
+    if hasattr(result['challenge'], 'extra') and 'answer' in result['challenge'].extra:
+        print(f"Ground Truth: {result['challenge'].extra['answer']}")
+    
+    # Show if saved
+    if 'saved_to' in result:
+        print(f"\n✓ Results saved to: {result['saved_to']}")
+    
     print("="*70)
 
 
@@ -217,12 +241,18 @@ def main():
                        help='Path to config file (default: config.json)')
     parser.add_argument('--api-key', type=str, default=None,
                        help='OpenAI API key (default: OPENAI_API_KEY env var)')
+    parser.add_argument('--base-url', type=str, default=None,
+                        help='LLM endpoint (default: BASE_URL env var)')
     parser.add_argument('--model', type=str, default=None,
                        help='Model to use (default: from config or gpt-4o)')
     parser.add_argument('--temperature', type=float, default=None,
                        help='Sampling temperature (default: from config or 0.7)')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable verbose output')
+    parser.add_argument('--save', action='store_true',
+                       help='Save results to file')
+    parser.add_argument('--output-dir', type=str, default='results',
+                       help='Directory to save results (default: results)')
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     

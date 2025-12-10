@@ -20,6 +20,7 @@ This agent provides intelligent solutions for four different task types:
 - 🎨 **Response Parsing**: Extract code blocks and boxed answers automatically
 - 🔧 **Configurable**: Flexible configuration for API settings, generation parameters, and more
 - 🚀 **Environment Integration**: Direct integration with PrimeIntellect task generators and evaluators
+- 💾 **Result Saving**: Save conversation history, scores, and extracted answers to JSON files
 
 ## Installation
 
@@ -107,6 +108,84 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Saving Results
+
+Save conversation history, scores, and extracted answers to JSON files:
+
+### CLI Usage
+
+```bash
+# Save single evaluation
+python cli.py --save --output-dir my_results evaluate --env mth --task-id 0
+
+# Save benchmark results
+python cli.py --save --output-dir my_results benchmark --env mth --num-tasks 10
+```
+
+### Python API
+
+```python
+import asyncio
+from env_integration import PrimeIntellectEnvironmentAgent, PrimeIntellectAgentConfig
+
+async def main():
+    config = PrimeIntellectAgentConfig(model="gpt-4o")
+    env_agent = PrimeIntellectEnvironmentAgent(config)
+    
+    # Save single evaluation
+    result = await env_agent.solve_and_evaluate(
+        env="mth",
+        task_id=0,
+        save_results=True,
+        output_dir="results"
+    )
+    print(f"Saved to: {result['saved_to']}")
+    
+    # Save benchmark
+    benchmark = await env_agent.run_benchmark(
+        env="mth",
+        num_tasks=10,
+        save_results=True,
+        output_dir="results"
+    )
+    print(f"Saved to: {benchmark['saved_to']}")
+
+asyncio.run(main())
+```
+
+### Load and Analyze Saved Results
+
+```python
+from result_saver import ResultSaver
+
+saver = ResultSaver("results")
+
+# List saved files
+files = saver.list_saved_results(env="mth")
+
+# Load a result
+data = saver.load_evaluation(files[0])
+print(f"Score: {data['score']}")
+print(f"Extracted Answer: {data['extracted_answer']}")
+print(f"Ground Truth: {data.get('ground_truth')}")
+print(f"Conversation: {len(data['conversation_history'])} turns")
+
+# Get statistics
+stats = saver.get_statistics(env="mth")
+print(f"Average Score: {stats['average_score']:.2%}")
+```
+
+### Saved Data Format
+
+Each saved result includes:
+- **metadata**: Environment, task ID, timestamp
+- **challenge**: Original prompt and extra data
+- **response**: Agent's full response
+- **score**: Evaluation score
+- **extracted_answer**: Parsed answer (code or boxed answer)
+- **ground_truth**: Correct answer (if available)
+- **conversation_history**: Full conversation with system prompt
 
 ## Configuration
 

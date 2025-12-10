@@ -87,6 +87,8 @@ class PrimeIntellectEnvironmentAgent:
         self, 
         env: str, 
         task_id: Optional[int] = None,
+        save_results: bool = False,
+        output_dir: str = "results",
         **eval_kwargs
     ) -> Dict[str, Any]:
         """
@@ -95,10 +97,12 @@ class PrimeIntellectEnvironmentAgent:
         Args:
             env: Environment name
             task_id: Optional task ID
+            save_results: Whether to save results to file
+            output_dir: Directory to save results
             **eval_kwargs: Additional evaluation arguments
             
         Returns:
-            Dictionary with challenge, response, and evaluation results
+            Dictionary with challenge, response, evaluation results, conversation history, and extracted answer
         """
         # Generate task
         challenge = await self.generate_task(env, task_id)
@@ -109,6 +113,18 @@ class PrimeIntellectEnvironmentAgent:
             "prompt": challenge.prompt,
             "extra": challenge.extra
         })
+        # final_answer = challenge.extra["answer"]
+        # response = f"Final Answer: The final answer is $\\boxed{final_answer}$"
+        
+        # Get conversation history
+        conversation_history = self.agent.get_conversation_history(env)
+        
+        # Extract answer based on environment type
+        extracted_answer = None
+        if env in ["mth", "sci"]:
+            extracted_answer = self.agent.extract_boxed_answer(response)
+        elif env == "cde":
+            extracted_answer = self.agent.extract_code(response)
         
         # Evaluate response
         task_gen = self.task_generators[env]
@@ -122,19 +138,31 @@ class PrimeIntellectEnvironmentAgent:
         else:  # lgc
             score = await task_gen.evaluate(response, challenge)
         
-        return {
+        result = {
             "env": env,
             "challenge": challenge,
             "response": response,
             "score": score,
-            "task_id": task_id
+            "task_id": task_id,
+            "conversation_history": conversation_history,
+            "extracted_answer": extracted_answer
         }
+        
+        # Save results if requested
+        if save_results:
+            from result_saver import save_result
+            filepath = save_result(result, conversation_history, extracted_answer, output_dir)
+            result["saved_to"] = filepath
+        
+        return result
     
     async def run_benchmark(
         self,
         env: str,
         num_tasks: int = 10,
         start_task_id: int = 0,
+        save_results: bool = False,
+        output_dir: str = "results",
         **eval_kwargs
     ) -> Dict[str, Any]:
         """
@@ -144,22 +172,33 @@ class PrimeIntellectEnvironmentAgent:
             env: Environment name
             num_tasks: Number of tasks to evaluate
             start_task_id: Starting task ID
+            save_results: Whether to save results to file
+            output_dir: Directory to save results
             **eval_kwargs: Additional evaluation arguments
             
         Returns:
-            Dictionary with results and statistics
+            Dictionary with results, statistics, conversation histories, and extracted answers
         """
         results = []
         scores = []
+        all_conversations = {}
+        all_extracted_answers = {}
         
         for i in range(num_tasks):
             task_id = start_task_id + i
             print(f"Evaluating task {task_id} ({i+1}/{num_tasks})...")
             
             try:
-                result = await self.solve_and_evaluate(env, task_id, **eval_kwargs)
+                result = await self.solve_and_evaluate(env, task_id, save_results=False, **eval_kwargs)
                 results.append(result)
                 scores.append(result["score"])
+                
+                # Store conversation history and extracted answer
+                if "conversation_history" in result:
+                    all_conversations[task_id] = result["conversation_history"]
+                if "extracted_answer" in result:
+                    all_extracted_answers[task_id] = result["extracted_answer"]
+                
                 print(f"Task {task_id}: Score = {result['score']}")
             except Exception as e:
                 print(f"Error on task {task_id}: {e}")
@@ -171,14 +210,26 @@ class PrimeIntellectEnvironmentAgent:
                 })
                 scores.append(0.0)
         
-        return {
+        benchmark_results = {
             "env": env,
             "num_tasks": num_tasks,
             "results": results,
             "scores": scores,
             "average_score": sum(scores) / len(scores) if scores else 0.0,
-            "success_rate": sum(1 for s in scores if s > 0) / len(scores) if scores else 0.0
+            "success_rate": sum(1 for s in scores if s > 0) / len(scores) if scores else 0.0,
+            "all_conversations": all_conversations,
+            "all_extracted_answers": all_extracted_answers
         }
+        
+        # Save benchmark results if requested
+        if save_results:
+            from result_saver import ResultSaver
+            saver = ResultSaver(output_dir)
+            filepath = saver.save_benchmark(benchmark_results, all_conversations, all_extracted_answers)
+            benchmark_results["saved_to"] = filepath
+            print(f"\n✓ Benchmark results saved to: {filepath}")
+        
+        return benchmark_results
     
     def reset_agent(self, env: Optional[str] = None):
         """
@@ -198,8 +249,11 @@ async def evaluate_agent(
     env: str = "mth",
     num_tasks: int = 10,
     api_key: Optional[str] = None,
+    base_url:Optional[str] = None,
     model: str = "gpt-4o",
     verbose: bool = True,
+    save_results: bool = False,
+    output_dir: str = "results",
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -209,8 +263,11 @@ async def evaluate_agent(
         env: Environment name (cde, lgc, mth, sci)
         num_tasks: Number of tasks to evaluate
         api_key: OpenAI API key
+        base_url: OpenAI Endpoint url
         model: Model name
         verbose: Print progress
+        save_results: Whether to save results to file
+        output_dir: Directory to save results
         **kwargs: Additional configuration
         
     Returns:
@@ -220,11 +277,11 @@ async def evaluate_agent(
         api_key=api_key,
         model=model,
         verbose=verbose,
+        base_url=base_url,
         **kwargs
     )
-    
     env_agent = PrimeIntellectEnvironmentAgent(agent_config)
-    return await env_agent.run_benchmark(env, num_tasks)
+    return await env_agent.run_benchmark(env, num_tasks, save_results=save_results, output_dir=output_dir)
 
 
 # Example usage
