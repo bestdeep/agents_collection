@@ -29,7 +29,7 @@ class BabyAIAgentConfig:
     timeout: float = field(default=60.0)
     
     # Agent Parameters
-    max_rounds: int = field(default=20)
+    max_rounds: int = field(default=30)
     max_retries: int = field(default=10)
     retry_delay: float = field(default=1.0)
 
@@ -153,13 +153,14 @@ Action:
         
         raise RuntimeError(f"Failed after {self.config.max_retries} attempts. Last error: {last_error}")
     
-    def generate_action(self, observation: str, goal: Optional[str] = None) -> str:
+    def generate_action(self, observation: str, goal: Optional[str] = None, max_retries: int = 10) -> str:
         """
         Generate an action based on the current observation and goal.
         
         Args:
             observation: Current observation from the environment
             goal: Optional goal description (included in first observation)
+            max_retries: Maximum number of retries if action generation fails
             
         Returns:
             Generated action string in the format:
@@ -168,7 +169,7 @@ Action:
         """
         # Construct the user message
         if goal:
-            user_message = f"Goal: {goal}"
+            user_message = f"{goal}"
             # user_message = f"Goal: {goal}\n\nObservation: {observation}"
         else:
             user_message = f"Observation: {observation}"
@@ -179,16 +180,42 @@ Action:
             "content": user_message
         })
         
-        # Generate response
-        response = self._make_api_call(self.conversation_history)
-        
-        # Add response to conversation history
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response
-        })
-        
-        return response
+        # Generate response with retry logic
+        for attempt in range(max_retries):
+            try:
+                response = self._make_api_call(self.conversation_history)
+                
+                # Validate that response is not empty
+                if not response or not response.strip():
+                    if attempt < max_retries - 1:
+                        print(f"Warning: Empty response from LLM (attempt {attempt + 1}/{max_retries}), retrying...")
+                        continue
+                    else:
+                        # Fallback to a safe default action
+                        response = "Thought:\nI need to take an action.\n\nAction:\nmove forward"
+                        print("Warning: Using fallback action after multiple empty responses")
+                
+                # Add response to conversation history
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": response
+                })
+                
+                return response
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Error generating action (attempt {attempt + 1}/{max_retries}): {e}")
+                    time.sleep(self.config.retry_delay)
+                else:
+                    # Last attempt failed, use fallback
+                    print(f"Error generating action after {max_retries} attempts: {e}")
+                    response = "Thought:\nI need to take an action.\n\nAction:\nmove forward"
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    return response
     
     def run_episode(self, env_client, env_idx: str, data_idx: int) -> Dict:
         """

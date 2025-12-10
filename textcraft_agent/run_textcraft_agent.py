@@ -27,13 +27,29 @@ except ImportError as e:
     sys.exit(1)
 
 
-def run_evaluation(config_path: str, verbose: bool = True):
+def load_task_ids(file_path: str) -> list:
+    """
+    Load task IDs from a file.
+    
+    Args:
+        file_path: Path to file containing task IDs (JSON array)
+        
+    Returns:
+        List of task IDs as integers
+    """
+    with open(file_path, 'r') as f:
+        task_ids = json.load(f)
+    return task_ids
+
+
+def run_evaluation(config_path: str, verbose: bool = True, task_list_file: str = None):
     """
     Run evaluation of the TextCraft agent.
     
     Args:
         config_path: Path to the configuration JSON file
         verbose: Whether to print detailed progress
+        task_list_file: Optional path to file with task IDs
     """
     # Load configuration
     with open(config_path, 'r') as f:
@@ -43,6 +59,22 @@ def run_evaluation(config_path: str, verbose: bool = True):
     agent_config = TextCraftAgentConfig(**config["agent"])
     env_config = config["environment"]
     eval_config = config["evaluation"]
+    
+    # Load task IDs
+    if task_list_file:
+        if not os.path.exists(task_list_file):
+            print(f"Error: Task list file not found: {task_list_file}")
+            sys.exit(1)
+        task_ids = load_task_ids(task_list_file)
+        if not task_ids:
+            print(f"Error: No valid task IDs found in {task_list_file}")
+            sys.exit(1)
+        print(f"Loaded {len(task_ids)} task IDs from {task_list_file}")
+    else:
+        # Generate task IDs from config
+        num_tasks = eval_config["num_tasks"]
+        start_idx = eval_config["start_idx"]
+        task_ids = list(range(start_idx, start_idx + num_tasks))
     
     # Create output directory
     output_dir = Path(eval_config["output_dir"])
@@ -63,16 +95,16 @@ def run_evaluation(config_path: str, verbose: bool = True):
         timeout=env_config.get("timeout", 300)
     )
     
-    # Run evaluation
-    num_tasks = eval_config["num_tasks"]
-    start_idx = eval_config["start_idx"]
-    
     print(f"\n{'='*70}")
     print(f"TextCraft Agent Evaluation")
     print(f"{'='*70}")
     print(f"Model: {agent_config.model}")
     print(f"Environment Server: {env_config['env_server']}")
-    print(f"Tasks: {num_tasks} (starting from index {start_idx})")
+    print(f"Tasks to evaluate: {len(task_ids)}")
+    if task_list_file:
+        print(f"Task list file: {task_list_file}")
+    else:
+        print(f"Task range: {eval_config['start_idx']} to {eval_config['start_idx'] + eval_config['num_tasks'] - 1}")
     print(f"Output Directory: {run_dir}")
     print(f"{'='*70}\n")
     
@@ -91,12 +123,11 @@ def run_evaluation(config_path: str, verbose: bool = True):
     total_reward = 0.0
     
     try:
-        for i in range(num_tasks):
-            task_idx = start_idx + i
+        for i, task_idx in enumerate(task_ids):
             
             if verbose:
                 print(f"\n{'#'*70}")
-                print(f"Task {i+1}/{num_tasks} (Data Index: {task_idx})")
+                print(f"Task {i+1}/{len(task_ids)} (Data Index: {task_idx})")
                 print(f"{'#'*70}")
             
             try:
@@ -215,10 +246,12 @@ def run_evaluation(config_path: str, verbose: bool = True):
     summary = {
         "timestamp": timestamp,
         "config": config,
-        "total_tasks": num_tasks,
+        "total_tasks": len(task_ids),
+        "task_ids": task_ids,
+        "task_list_file": task_list_file if task_list_file else None,
         "successful_tasks": success_count,
-        "success_rate": success_count / num_tasks if num_tasks > 0 else 0,
-        "average_reward": total_reward / num_tasks if num_tasks > 0 else 0,
+        "success_rate": success_count / len(task_ids) if task_ids else 0,
+        "average_reward": total_reward / len(task_ids) if task_ids else 0,
         "results": results
     }
     
@@ -230,10 +263,10 @@ def run_evaluation(config_path: str, verbose: bool = True):
     print(f"\n{'='*70}")
     print(f"Evaluation Complete!")
     print(f"{'='*70}")
-    print(f"Total Tasks: {num_tasks}")
+    print(f"Total Tasks: {len(task_ids)}")
     print(f"Successful: {success_count}")
-    print(f"Success Rate: {100*success_count/num_tasks:.1f}%")
-    print(f"Average Reward: {total_reward/num_tasks:.3f}")
+    print(f"Success Rate: {100*success_count/len(task_ids):.1f}%")
+    print(f"Average Reward: {total_reward/len(task_ids):.3f}")
     print(f"\nResults saved to: {run_dir}")
     print(f"Summary file: {summary_file}")
     print(f"{'='*70}\n")
@@ -251,6 +284,12 @@ def main():
         "--verbose",
         action="store_true",
         help="Print detailed progress"
+    )
+    parser.add_argument(
+        "--task-list",
+        type=str,
+        default=None,
+        help="Path to file containing list of task IDs (JSON array)"
     )
     parser.add_argument(
         "--num-tasks",
@@ -280,12 +319,12 @@ def main():
         with open(temp_config, 'w') as f:
             json.dump(config, f, indent=2)
         
-        run_evaluation(temp_config, verbose=args.verbose)
+        run_evaluation(temp_config, verbose=args.verbose, task_list_file=args.task_list)
         
         # Clean up
         os.remove(temp_config)
     else:
-        run_evaluation(args.config, verbose=args.verbose)
+        run_evaluation(args.config, verbose=args.verbose, task_list_file=args.task_list)
 
 
 if __name__ == "__main__":

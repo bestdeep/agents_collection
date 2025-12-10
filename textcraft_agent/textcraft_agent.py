@@ -200,13 +200,14 @@ Action:
         
         return response.strip()
     
-    def generate_action(self, observation: str, include_goal: bool = False) -> tuple[str, str]:
+    def generate_action(self, observation: str, include_goal: bool = False, max_retries: int = 10) -> tuple[str, str]:
         """
         Generate an action based on the current observation.
         
         Args:
             observation: Current observation from the environment
             include_goal: Whether the observation includes the goal (first step)
+            max_retries: Maximum number of retries if action generation fails
             
         Returns:
             Tuple of (full_response, action_command)
@@ -217,19 +218,58 @@ Action:
             "content": observation
         })
         
-        # Generate response
-        response = self._make_api_call(self.conversation_history)
-        
-        # Add response to conversation history
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response
-        })
-        
-        # Extract action
-        action = self.parse_action(response)
-        
-        return response, action
+        # Generate response with retry logic
+        for attempt in range(max_retries):
+            try:
+                response = self._make_api_call(self.conversation_history)
+                
+                # Validate that response is not empty
+                if not response or not response.strip():
+                    if attempt < max_retries - 1:
+                        print(f"Warning: Empty response from LLM (attempt {attempt + 1}/{max_retries}), retrying...")
+                        continue
+                    else:
+                        # Fallback to a safe default action
+                        response = "Thought:\nI need to check my inventory first.\n\nAction:\ninventory"
+                        print("Warning: Using fallback action after multiple empty responses")
+                
+                # Extract action
+                action = self.parse_action(response)
+                
+                # Validate that action was extracted
+                if not action or not action.strip():
+                    if attempt < max_retries - 1:
+                        print(f"Warning: Could not extract action from response (attempt {attempt + 1}/{max_retries}), retrying...")
+                        # Remove the bad response and try again
+                        self.conversation_history.pop()
+                        continue
+                    else:
+                        # Use fallback action
+                        action = "inventory"
+                        print("Warning: Using fallback action 'inventory' after failed extraction")
+                
+                # Add response to conversation history
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": response
+                })
+                
+                return response, action
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Error generating action (attempt {attempt + 1}/{max_retries}): {e}")
+                    time.sleep(self.config.retry_delay)
+                else:
+                    # Last attempt failed, use fallback
+                    print(f"Error generating action after {max_retries} attempts: {e}")
+                    response = "Thought:\nI need to check my inventory first.\n\nAction:\ninventory"
+                    action = "inventory"
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    return response, action
     
     def save_conversation(self, filepath: str):
         """

@@ -68,12 +68,30 @@ def parse_args():
                         help="Number of tasks to evaluate")
     parser.add_argument("--start_idx", type=int, default=0,
                         help="Starting task index")
+    parser.add_argument("--task_list", type=str, default=None,
+                        help="Path to file containing list of task IDs (one per line)")
     parser.add_argument("--output_dir", type=str, default="./babyai_results",
                         help="Directory to save results")
     parser.add_argument("--save_conversations", action="store_true",
                         help="Save conversation histories")
     
     return parser.parse_args()
+
+
+def load_task_ids(file_path: str) -> list:
+    """
+    Load task IDs from a file.
+    
+    Args:
+        file_path: Path to file containing task IDs (JSON array)
+        
+    Returns:
+        List of task IDs as integers
+    """
+    task_ids = []
+    with open(file_path, 'r') as f:
+        task_ids = json.load(f)
+    return task_ids
 
 
 def main():
@@ -85,6 +103,20 @@ def main():
     if not api_key:
         print("Error: API key not provided. Set --api_key or OPENAI_API_KEY environment variable.")
         sys.exit(1)
+    
+    # Load task IDs if task_list is provided
+    if args.task_list:
+        if not os.path.exists(args.task_list):
+            print(f"Error: Task list file not found: {args.task_list}")
+            sys.exit(1)
+        task_ids = load_task_ids(args.task_list)
+        if not task_ids:
+            print(f"Error: No valid task IDs found in {args.task_list}")
+            sys.exit(1)
+        print(f"Loaded {len(task_ids)} task IDs from {args.task_list}")
+    else:
+        # Generate task IDs from start_idx and num_tasks
+        task_ids = list(range(args.start_idx, args.start_idx + args.num_tasks))
     
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -99,7 +131,11 @@ def main():
     print(f"Environment server: {args.env_server}")
     print(f"Model: {args.model}")
     print(f"Max rounds: {args.max_rounds}")
-    print(f"Tasks to evaluate: {args.num_tasks}")
+    print(f"Tasks to evaluate: {len(task_ids)}")
+    if args.task_list:
+        print(f"Task list file: {args.task_list}")
+    else:
+        print(f"Task range: {args.start_idx} to {args.start_idx + args.num_tasks - 1}")
     print(f"Output directory: {args.output_dir}")
     print("=" * 60)
     
@@ -137,8 +173,7 @@ def main():
     total_reward = 0.0
     
     try:
-        for i in tqdm(range(args.num_tasks), desc="Evaluating tasks"):
-            data_idx = args.start_idx + i
+        for i, data_idx in enumerate(tqdm(task_ids, desc="Evaluating tasks")):
             
             try:
                 # Run episode
@@ -173,7 +208,7 @@ def main():
                 if (i + 1) % 5 == 0:
                     current_success_rate = total_success / (i + 1)
                     current_avg_reward = total_reward / (i + 1)
-                    print(f"\nProgress: {i+1}/{args.num_tasks}")
+                    print(f"\nProgress: {i+1}/{len(task_ids)}")
                     print(f"  Success rate: {current_success_rate:.2%}")
                     print(f"  Average reward: {current_avg_reward:.3f}")
                 
@@ -200,8 +235,10 @@ def main():
         "config": {
             "model": args.model,
             "max_rounds": args.max_rounds,
-            "num_tasks": args.num_tasks,
-            "start_idx": args.start_idx
+            "num_tasks": len(task_ids),
+            "task_list": args.task_list if args.task_list else None,
+            "start_idx": args.start_idx if not args.task_list else None,
+            "task_ids": task_ids
         },
         "results": {
             "total_tasks": len(results),
