@@ -15,6 +15,7 @@ from pathlib import Path
 from agent import AffineAgentConfig, create_agent
 from env_integration import AffineEnvironmentAgent, evaluate_agent
 from config_utils import load_config, create_agent_config_from_dict, get_env_configs
+from dataset_generator import DatasetGenerator
 
 
 async def cmd_evaluate(args):
@@ -268,6 +269,58 @@ async def run_benchmark(args):
     return results
 
 
+async def cmd_generate_dataset(args):
+    """Generate training dataset from successful agent conversations."""
+    from datetime import datetime
+    
+    # Load config
+    try:
+        config_dict = load_config(args.config)
+        agent_config = create_agent_config_from_dict(config_dict)
+        agent_config.verbose = args.verbose
+        env_configs = get_env_configs(config_dict)
+    except FileNotFoundError:
+        agent_config = AffineAgentConfig(
+            api_key=args.api_key or os.getenv("OPENAI_API_KEY"),
+            model=args.model or "gpt-4o",
+            base_url=args.base_url or os.getenv("BASE_URL") or "https://api.openai.com/v1",
+            temperature=args.temperature or 0.7,
+            verbose=args.verbose
+        )
+        env_configs = {}
+    
+    # Override with CLI args
+    if args.api_key:
+        agent_config.api_key = args.api_key
+    if args.model:
+        agent_config.model = args.model
+    if args.base_url:
+        agent_config.base_url = args.base_url
+    if args.temperature is not None:
+        agent_config.temperature = args.temperature
+    
+    # Create generator
+    generator = DatasetGenerator(agent_config, env_configs)
+    
+    # Generate task IDs
+    task_ids = list(range(args.start_id, args.end_id + 1))
+    
+    # Create output filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"{args.output_dir}/{args.env}_dataset_{args.start_id}_{args.end_id}_{timestamp}.json"
+    
+    # Generate dataset
+    results = await generator.generate_dataset(
+        env=args.env,
+        task_ids=task_ids,
+        output_file=output_file,
+        verbose=args.verbose,
+        save_interval=args.save_interval
+    )
+    
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="CLI for Affine Agent (SAT, ABD, and DED tasks)",
@@ -288,6 +341,12 @@ Examples:
   
   # Interactive mode
   python cli.py interactive --env ded
+  
+  # Generate dataset from Score 1.0 conversations (ABD tasks 20000-20100)
+  python cli.py generate-dataset --env abd --start-id 20000 --end-id 20100 --verbose
+  
+  # Generate dataset for DED tasks 20000-23302 with API key
+  python cli.py generate-dataset --env ded --start-id 20000 --end-id 23302 --api-key YOUR_KEY
   
   # Run with custom model
   python cli.py benchmark --env abd --num-tasks 5 --model deepseek-ai/DeepSeek-V3
@@ -328,6 +387,13 @@ Examples:
     interactive_parser = subparsers.add_parser("interactive", help="Interactive mode", parents=[parent_parser])
     interactive_parser.add_argument("--env", default="ded", choices=["sat", "abd", "ded"], help="Environment type (default: ded)")
     
+    # Generate dataset command
+    dataset_parser = subparsers.add_parser("generate-dataset", help="Generate training dataset from Score 1.0 tasks", parents=[parent_parser])
+    dataset_parser.add_argument("--env", required=True, choices=["abd", "ded"], help="Environment name (sat not supported for dataset generation)")
+    dataset_parser.add_argument("--start-id", type=int, required=True, help="Starting task ID (inclusive)")
+    dataset_parser.add_argument("--end-id", type=int, required=True, help="Ending task ID (inclusive)")
+    dataset_parser.add_argument("--save-interval", type=int, default=10, help="Save intermediate results every N tasks")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -335,7 +401,7 @@ Examples:
         return
     
     # Check for API key
-    if not args.api_key and not os.getenv("OPENAI_API_KEY"):
+    if not args.api_key and not os.getenv("OPENAI_API_KEY") and args.base_url is None:
         print("Error: No API key provided. Set OPENAI_API_KEY environment variable or use --api-key")
         sys.exit(1)
     
@@ -348,6 +414,8 @@ Examples:
         asyncio.run(run_benchmark(args))
     elif args.command == "interactive":
         cmd_interactive(args)
+    elif args.command == "generate-dataset":
+        asyncio.run(cmd_generate_dataset(args))
 
 
 if __name__ == "__main__":

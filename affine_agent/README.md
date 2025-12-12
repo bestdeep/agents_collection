@@ -4,21 +4,23 @@ A unified LLM-based agent for Affine environments in the AffineFoundation/affine
 
 ## Overview
 
-This agent provides intelligent solutions for two Affine task types:
+This agent provides intelligent solutions for three Affine task types:
 
+- **SAT (Boolean Satisfiability)**: Find variable assignments that satisfy Boolean formulas
 - **ABD (Algorithm By Deduction)**: Reverse engineering - given a Python program and its output, deduce the input that produces that output
 - **DED (Direct Execution Debug)**: Code generation - write Python programs that solve given requirements and pass test cases
 
 ## Features
 
-- 🎯 **Unified Interface**: Single agent handles both ABD and DED environments
+- 🎯 **Unified Interface**: Single agent handles SAT, ABD, and DED environments
 - 🧠 **Intelligent Prompting**: Environment-specific system prompts optimized for each task type
 - 🔄 **Conversation Management**: Maintains separate conversation histories per environment
 - 📊 **Batch Processing**: Evaluate multiple challenges efficiently
-- 🎨 **Response Parsing**: Extract code blocks and input data automatically
+- 🎨 **Response Parsing**: Extract code blocks, input data, and SAT assignments automatically
 - 🔧 **Configurable**: Flexible configuration for API settings and generation parameters
 - 🚀 **Environment Integration**: Direct integration with Affine task generators and evaluators
 - 💾 **Result Saving**: Save conversation history, scores, and extracted answers to JSON files
+- 📚 **Dataset Generation**: Create training datasets from successful (Score 1.0) conversations
 
 ## Installation
 
@@ -301,6 +303,53 @@ analysis = analyze_results(results)
 print(f"Average Score: {analysis['avg_score']:.3f}")
 print(f"Total Tasks: {analysis['total_tasks']}")
 ```
+
+## Dataset Generation
+
+Generate training datasets from successful agent conversations (Score 1.0 only):
+
+```bash
+# Generate ABD dataset for tasks 20000-20100
+python cli.py generate-dataset \
+  --env abd \
+  --start-id 20000 \
+  --end-id 20100 \
+  --verbose
+
+# Generate DED dataset for full range 20000-23302
+python cli.py generate-dataset \
+  --env ded \
+  --start-id 20000 \
+  --end-id 23302 \
+  --save-interval 50 \
+  --output-dir generated_datasets
+
+# Use quick script for interactive generation
+./generate_datasets.sh
+```
+
+**Output format** (compatible with training pipelines):
+```json
+[
+  {
+    "conversations": [
+      {
+        "from": "human",
+        "loss": null,
+        "value": "<task prompt>"
+      },
+      {
+        "from": "gpt",
+        "loss": true,
+        "value": "<agent response>"
+      }
+    ],
+    "item_id": "abd_task_20000"
+  }
+]
+```
+
+See [DATASET_GENERATION.md](DATASET_GENERATION.md) for detailed documentation.
 
 ## System Prompts
 
