@@ -1,8 +1,8 @@
 """
-PrimeIntellect Agent - Environment Integration
+Affine Agent - Environment Integration
 
-This module provides integration with the PrimeIntellect task environments,
-allowing the agent to work seamlessly with CDE, LGC, MTH, and SCI tasks.
+This module provides integration with the Affine task environments,
+allowing the agent to work seamlessly with ABD and DED tasks.
 """
 
 import sys
@@ -13,39 +13,24 @@ from typing import Optional, Dict, Any
 import json
 
 # Add environment paths
-sys.path.insert(0, '/home/120/affinetes/environments/primeintellect/cde')
-sys.path.insert(0, '/home/120/affinetes/environments/primeintellect/lgc')
-sys.path.insert(0, '/home/120/affinetes/environments/primeintellect/mth')
-sys.path.insert(0, '/home/120/affinetes/environments/primeintellect/sci')
+sys.path.insert(0, '/home/120/affinetes/environments/affine')
 
-from agent import PrimeIntellectAgent, PrimeIntellectAgentConfig
-
-# Apply safety patches to limit resource usage
-try:
-    from safe_eval_patch import apply_patch
-    apply_patch()
-except Exception as e:
-    print(f"Warning: Could not apply safety patches: {e}")
+from agent import AffineAgent, AffineAgentConfig
 
 
 # Global task generator cache to avoid reloading datasets
 _TASK_GENERATOR_CACHE = {}
 
-# Known problematic task IDs that cause system kills
-_PROBLEMATIC_TASKS = {
-    "cde": [5, 12, 14, 16, 17, 20, 22, 29, 31, 32, 34, 37],  # Task 5 causes system kill during evaluation
-}
 
-
-class PrimeIntellectEnvironmentAgent:
+class AffineEnvironmentAgent:
     """
-    Agent wrapper that integrates with PrimeIntellect task environments.
-    Handles task generation and evaluation across all environment types.
+    Agent wrapper that integrates with Affine task environments.
+    Handles task generation and evaluation for ABD and DED tasks.
     """
     
     def __init__(
         self,
-        agent_config: Optional[PrimeIntellectAgentConfig] = None,
+        agent_config: Optional[AffineAgentConfig] = None,
         env_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ):
         """
@@ -55,7 +40,7 @@ class PrimeIntellectEnvironmentAgent:
             agent_config: Configuration for the LLM agent
             env_configs: Environment-specific configurations for task generators
         """
-        self.agent = PrimeIntellectAgent(agent_config)
+        self.agent = AffineAgent(agent_config)
         self.env_configs = env_configs or {}
         self.task_generators = {}
         
@@ -65,7 +50,7 @@ class PrimeIntellectEnvironmentAgent:
         Uses global cache to avoid reloading datasets.
         
         Args:
-            env: Environment name (cde, lgc, mth, sci)
+            env: Environment name (sat, abd, ded)
         """
         # Check global cache first
         if env in _TASK_GENERATOR_CACHE:
@@ -77,18 +62,22 @@ class PrimeIntellectEnvironmentAgent:
         
         env_config = self.env_configs.get(env, {})
         
-        if env == "cde":
-            from code_task import CodeTask
-            task_gen = CodeTask(**env_config)
-        elif env == "lgc":
-            from logic_task import LogicTask
-            task_gen = LogicTask(**env_config)
-        elif env == "mth":
-            from math_task import MathTask
-            task_gen = MathTask(**env_config)
-        elif env == "sci":
-            from sci_task import ScienceTask
-            task_gen = ScienceTask(**env_config)
+        # Filter config to only include valid parameters for each task type
+        if env == "sat":
+            from sat import SATTask
+            # SATTask accepts: n, k
+            sat_config = {k: v for k, v in env_config.items() if k in ['n', 'k']}
+            task_gen = SATTask(**sat_config)
+        elif env == "abd":
+            from abd import ABDTask
+            # ABDTask accepts: dataset, dataset_name (not split)
+            abd_config = {k: v for k, v in env_config.items() if k in ['dataset', 'dataset_name']}
+            task_gen = ABDTask(**abd_config)
+        elif env == "ded":
+            from ded import DEDTask
+            # DEDTask accepts: dataset, dataset_name (not split)
+            ded_config = {k: v for k, v in env_config.items() if k in ['dataset', 'dataset_name']}
+            task_gen = DEDTask(**ded_config)
         else:
             raise ValueError(f"Unknown environment: {env}")
         
@@ -101,7 +90,7 @@ class PrimeIntellectEnvironmentAgent:
         Generate a task from the specified environment.
         
         Args:
-            env: Environment name
+            env: Environment name (sat, abd, ded)
             task_id: Optional task ID for deterministic selection
             
         Returns:
@@ -123,7 +112,7 @@ class PrimeIntellectEnvironmentAgent:
         Generate a task, solve it with the agent, and evaluate the solution.
         
         Args:
-            env: Environment name
+            env: Environment name (sat, abd, ded)
             task_id: Optional task ID
             save_results: Whether to save results to file
             output_dir: Directory to save results
@@ -136,25 +125,22 @@ class PrimeIntellectEnvironmentAgent:
         challenge = await self.generate_task(env, task_id)
         
         # Solve with agent
-        # response = self.agent.solve_challenge({
-        #     "env": env,
-        #     "prompt": challenge.prompt,
-        #     "extra": challenge.extra
-        # })
-        info = json.loads(challenge.extra["info"]["game_data_str"])
-        print(f"info: {info}")
-        final_answer = info["solution"]
-        print(f"final_answer: {final_answer}")
-        response = f"{json.dumps(final_answer)}"
+        response = self.agent.solve_challenge({
+            "env": env,
+            "prompt": challenge.prompt,
+            "extra": challenge.extra
+        })
         
         # Get conversation history
         conversation_history = self.agent.get_conversation_history(env)
         
         # Extract answer based on environment type
         extracted_answer = None
-        if env in ["mth", "sci"]:
-            extracted_answer = self.agent.extract_boxed_answer(response)
-        elif env == "cde":
+        if env == "sat":
+            extracted_answer = self.agent.extract_sat_assignment(response)
+        elif env == "abd":
+            extracted_answer = self.agent.extract_input(response)
+        elif env == "ded":
             extracted_answer = self.agent.extract_code(response)
         
         # Evaluate response
@@ -163,24 +149,18 @@ class PrimeIntellectEnvironmentAgent:
         try:
             print(f"[DEBUG] Starting evaluation for {env} task {task_id}...")
             
-            # For CDE tasks, add a safety timeout wrapper
-            if env == "cde":
-                async def eval_with_safety():
-                    try:
-                        return await asyncio.wait_for(
-                            task_gen.evaluate(response, challenge, **eval_kwargs),
-                            timeout=60  # 60 second timeout for entire evaluation
-                        )
-                    except asyncio.TimeoutError:
-                        print(f"[WARNING] Evaluation timed out after 60s")
-                        return (0.0, "0/0 (timeout)")
-                
-                score = await eval_with_safety()
-            elif env in ["mth", "sci"]:
-                # Math and science may use judge models
-                score = await task_gen.evaluate(response, challenge, **eval_kwargs)
-            else:  # lgc
-                score = await task_gen.evaluate(response, challenge)
+            # Add a safety timeout wrapper
+            async def eval_with_safety():
+                try:
+                    return await asyncio.wait_for(
+                        task_gen.evaluate(response, challenge, **eval_kwargs),
+                        timeout=180  # 3 minute timeout for evaluation
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[WARNING] Evaluation timed out after 180s")
+                    return (0.0, "0/0 (timeout)")
+            
+            score = await eval_with_safety()
             
             print(f"[DEBUG] Evaluation completed with score: {score}")
         except Exception as e:
@@ -201,11 +181,24 @@ class PrimeIntellectEnvironmentAgent:
         
         # Save results if requested
         if save_results:
-            from result_saver import save_result
-            filepath = save_result(result, conversation_history, extracted_answer, output_dir)
-            result["saved_to"] = filepath
+            await self.save_result(result, output_dir)
         
         return result
+    
+    async def save_result(self, result: Dict[str, Any], output_dir: str):
+        """
+        Save evaluation result to a JSON file.
+        
+        Args:
+            result: Result dictionary from solve_and_evaluate
+            output_dir: Directory to save results
+        """
+        from result_saver import save_result
+        await save_result(result, output_dir)
+    
+    def reset_conversation(self, env: str):
+        """Reset the conversation for a specific environment."""
+        self.agent.reset_conversation(env)
     
     async def run_benchmark(
         self,
@@ -222,7 +215,7 @@ class PrimeIntellectEnvironmentAgent:
         Run a benchmark on multiple tasks.
         
         Args:
-            env: Environment name
+            env: Environment name (sat, abd, ded)
             num_tasks: Number of tasks to evaluate
             start_task_id: Starting task ID
             save_results: Whether to save results to file
@@ -248,13 +241,6 @@ class PrimeIntellectEnvironmentAgent:
         task_id = start_task_id
         
         while tasks_completed < num_tasks:
-            # Check if this is a known problematic task
-            if env in _PROBLEMATIC_TASKS and task_id in _PROBLEMATIC_TASKS[env]:
-                print(f"⚠ Task {task_id} is known to cause issues - automatically skipping")
-                skipped_tasks.append(task_id)
-                task_id += 1
-                continue
-            
             print(f"Evaluating task {task_id} ({tasks_completed+1}/{num_tasks})...")
             
             try:
@@ -343,114 +329,184 @@ class PrimeIntellectEnvironmentAgent:
             print(f"  Success Rate: {benchmark_results['success_rate']:.2%}")
         
         return benchmark_results
-    
-    def reset_agent(self, env: Optional[str] = None):
-        """
-        Reset agent conversation history.
-        
-        Args:
-            env: If specified, reset only this environment. Otherwise reset all.
-        """
-        if env:
-            self.agent.reset_conversation(env)
-        else:
-            self.agent.clear_all_conversations()
 
 
-# Convenience function for running evaluations
 async def evaluate_agent(
-    env: str = "mth",
+    env: str,
     num_tasks: int = 10,
+    task_ids: Optional[list] = None,
     api_key: Optional[str] = None,
-    base_url:Optional[str] = None,
+    base_url: Optional[str] = None,
     model: str = "gpt-4o",
-    verbose: bool = True,
+    temperature: float = 0.7,
+    agent_config: Optional[AffineAgentConfig] = None,
     save_results: bool = False,
     output_dir: str = "results",
     save_interval: int = 10,
-    **kwargs
+    verbose: bool = True,
+    **eval_kwargs
 ) -> Dict[str, Any]:
     """
-    Quick function to evaluate an agent on a specific environment.
+    Evaluate the agent on multiple tasks.
     
     Args:
-        env: Environment name (cde, lgc, mth, sci)
+        env: Environment name (sat, abd, ded)
         num_tasks: Number of tasks to evaluate
-        api_key: OpenAI API key
-        base_url: OpenAI Endpoint url
+        task_ids: Optional list of specific task IDs to evaluate
+        api_key: API key for LLM service
+        base_url: Base URL for API
         model: Model name
-        verbose: Print progress
-        save_results: Whether to save results to file
+        temperature: Sampling temperature
+        agent_config: Configuration for the agent (overrides other params if provided)
+        save_results: Whether to save individual results
         output_dir: Directory to save results
         save_interval: Save intermediate results every N tasks
-        **kwargs: Additional configuration
+        verbose: Print progress
+        **eval_kwargs: Additional evaluation arguments
         
     Returns:
-        Benchmark results dictionary
+        Dictionary with aggregate results
     """
-    agent_config = PrimeIntellectAgentConfig(
-        api_key=api_key,
-        model=model,
-        verbose=verbose,
-        base_url=base_url,
-        **kwargs
-    )
-    env_agent = PrimeIntellectEnvironmentAgent(agent_config)
-    return await env_agent.run_benchmark(
-        env, 
-        num_tasks, 
-        save_results=save_results, 
-        output_dir=output_dir,
-        save_interval=save_interval,
-        start_task_id=0
-    )
+    if agent_config is None:
+        agent_config = AffineAgentConfig(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            verbose=verbose
+        )
+    
+    env_agent = AffineEnvironmentAgent(agent_config)
+    
+    # If task_ids specified, use benchmark with those IDs
+    if task_ids:
+        # Run each task ID
+        results = []
+        scores = []
+        
+        for i, task_id in enumerate(task_ids):
+            if verbose:
+                print(f"\n{'='*60}")
+                print(f"Evaluating task {i+1}/{len(task_ids)} (ID: {task_id})")
+                print(f"{'='*60}")
+            
+            try:
+                result = await env_agent.solve_and_evaluate(
+                    env=env,
+                    task_id=task_id,
+                    save_results=save_results,
+                    output_dir=output_dir,
+                    **eval_kwargs
+                )
+                results.append(result)
+                
+                # Extract numeric score
+                score_value = result['score']
+                if isinstance(score_value, tuple):
+                    score_value = score_value[0]
+                scores.append(score_value)
+                
+                if verbose:
+                    print(f"Score: {result['score']}")
+                    
+            except Exception as e:
+                print(f"Error evaluating task {task_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                scores.append(0.0)
+                continue
+            
+            # Clear memory periodically
+            if (i + 1) % 5 == 0:
+                gc.collect()
+        
+        # Calculate aggregate statistics
+        avg_score = sum(scores) / len(scores) if scores else 0.0
+        max_score = max(scores) if scores else 0.0
+        min_score = min(scores) if scores else 0.0
+        
+        aggregate = {
+            "env": env,
+            "num_tasks": len(task_ids),
+            "results": results,
+            "scores": scores,
+            "avg_score": avg_score,
+            "average_score": avg_score,  # Alias for compatibility
+            "max_score": max_score,
+            "min_score": min_score,
+            "success_rate": sum(1 for s in scores if s > 0) / len(scores) if scores else 0.0
+        }
+    else:
+        # Use run_benchmark for sequential task IDs
+        aggregate = await env_agent.run_benchmark(
+            env=env,
+            num_tasks=num_tasks,
+            save_results=save_results,
+            output_dir=output_dir,
+            save_interval=save_interval,
+            **eval_kwargs
+        )
+        
+        # Add aliases for compatibility
+        if 'average_score' in aggregate:
+            aggregate['avg_score'] = aggregate['average_score']
+    
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Evaluation Complete")
+        print(f"{'='*60}")
+        print(f"Environment: {env}")
+        print(f"Tasks evaluated: {aggregate.get('num_tasks', 0)}")
+        print(f"Average score: {aggregate.get('average_score', 0):.3f}")
+        if 'success_rate' in aggregate:
+            print(f"Success rate: {aggregate['success_rate']:.2%}")
+    
+    return aggregate
 
 
-# Example usage
 if __name__ == "__main__":
+    # Example usage
+    import asyncio
+    
     async def main():
-        # Create agent with custom configuration
-        agent_config = PrimeIntellectAgentConfig(
+        # Create agent configuration
+        config = AffineAgentConfig(
             model="gpt-4o",
             temperature=0.7,
             verbose=True
         )
         
-        env_agent = PrimeIntellectEnvironmentAgent(agent_config)
+        # Create environment agent
+        env_agent = AffineEnvironmentAgent(config)
         
-        # Test on a single task from each environment
-        print("\n" + "="*60)
-        print("Testing Math Environment (MTH)")
-        print("="*60)
-        result_mth = await env_agent.solve_and_evaluate("mth", task_id=0)
-        print(f"Score: {result_mth['score']}")
+        # Test ABD task
+        print("Testing ABD (Algorithm By Deduction) task...")
+        abd_result = await env_agent.solve_and_evaluate(
+            env="abd",
+            task_id=0
+        )
+        print(f"ABD Score: {abd_result['score']}")
+        print(f"Extracted Input: {abd_result['extracted_answer']}")
         
+        # Test DED task
         print("\n" + "="*60)
-        print("Testing Science Environment (SCI)")
-        print("="*60)
-        result_sci = await env_agent.solve_and_evaluate("sci", task_id=0)
-        print(f"Score: {result_sci['score']}")
+        print("Testing DED (Direct Execution Debug) task...")
+        ded_result = await env_agent.solve_and_evaluate(
+            env="ded",
+            task_id=0
+        )
+        print(f"DED Score: {ded_result['score']}")
+        print(f"Extracted Code: {ded_result['extracted_answer'][:100] if ded_result['extracted_answer'] else None}...")
         
+        # Run benchmark on multiple tasks
         print("\n" + "="*60)
-        print("Testing Logic Environment (LGC)")
-        print("="*60)
-        result_lgc = await env_agent.solve_and_evaluate("lgc", task_id=0)
-        print(f"Score: {result_lgc['score']}")
-        
-        print("\n" + "="*60)
-        print("Testing Code Environment (CDE)")
-        print("="*60)
-        result_cde = await env_agent.solve_and_evaluate("cde", task_id=0)
-        print(f"Score: {result_cde['score']}")
-        
-        # Run a small benchmark
-        print("\n" + "="*60)
-        print("Running Math Benchmark (5 tasks)")
-        print("="*60)
-        benchmark = await env_agent.run_benchmark("mth", num_tasks=5)
-        print(f"\nResults:")
-        print(f"Average Score: {benchmark['average_score']:.2%}")
-        print(f"Success Rate: {benchmark['success_rate']:.2%}")
+        print("Running benchmark on 5 DED tasks...")
+        benchmark_results = await evaluate_agent(
+            env="ded",
+            num_tasks=5,
+            agent_config=config,
+            verbose=True
+        )
+        print(f"\nBenchmark Average Score: {benchmark_results['avg_score']:.3f}")
     
-    # Run the async main function
     asyncio.run(main())

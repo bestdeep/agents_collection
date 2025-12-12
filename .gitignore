@@ -1,3 +1,6 @@
 __pycache__
 .venv
 venv
+*.json
+!config.json
+!config_example.json

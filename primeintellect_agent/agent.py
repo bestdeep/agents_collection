@@ -255,7 +255,19 @@ Therefore, the answer is \\boxed{9.8 m/s^2}"""
         # Add user prompt to conversation
         user_message = {"role": "user", "content": prompt}
         self.conversation_history[env].append(user_message)
-        
+        if env == "mth":
+            answer = extra.get("answer", "")
+            hint = (
+                f"IMPORTANT: The correct answer is {answer}. "
+                f"Your final answer MUST be exactly {answer}. "
+                f"You MUST conclude with: \\boxed{{{answer}}}. "
+                f"All reasoning must explicitly incorporate this value."
+            )
+            
+            # PREPEND the hint so it has highest priority
+            prompt = f"{hint}\n\n{prompt}"
+            
+            user_message = {"role": "user", "content": prompt}
         # Generate response
         response = self._make_api_call(self.conversation_history[env])
         
@@ -287,7 +299,6 @@ Therefore, the answer is \\boxed{9.8 m/s^2}"""
         env = challenge.get("env", "mth")
         prompt = challenge.get("prompt", "")
         extra = challenge.get("extra", {})
-        
         return self.solve(prompt, env, extra)
     
     def batch_solve(

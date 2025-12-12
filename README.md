@@ -91,6 +91,51 @@ See [primeintellect_agent/README.md](primeintellect_agent/README.md) for detaile
 
 ---
 
+### 4. Affine Agent
+
+**Environment**: Affine (ABD, DED)  
+**Directory**: `affine_agent/`  
+**Description**: A unified LLM-based agent for Affine environments: Algorithm By Deduction (reverse engineering program inputs) and Direct Execution Debug (Python code generation).
+
+**Key Features**:
+- Unified interface for ABD and DED environments
+- ABD: Reverse engineering - deduce inputs from program and output
+- DED: Code generation - write Python programs that pass test cases
+- Environment-specific intelligent prompting
+- Conversation history management
+- Automatic response parsing (input extraction and code extraction)
+- Direct integration with Affine evaluators
+- Result saving with scores and extracted answers
+- Batch evaluation support
+
+**Quick Start**:
+```bash
+cd affine_agent
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Python API usage
+python -c "
+import asyncio
+from env_integration import evaluate_agent
+
+async def main():
+    results = await evaluate_agent(env='ded', num_tasks=5, verbose=True)
+    print(f'Average Score: {results[\"avg_score\"]:.3f}')
+
+asyncio.run(main())
+"
+```
+
+**Task Types**:
+- **ABD (Algorithm By Deduction)**: Given a Python program and its output, determine the input
+- **DED (Direct Execution Debug)**: Write Python programs that solve given requirements
+
+See [affine_agent/README.md](affine_agent/README.md) for detailed documentation.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
